@@ -1,5 +1,6 @@
 import requests
-from typing import Any, Dict, List, Optional
+from re import search
+from typing import Any, Dict, List
 
 class NPMClient:
     def __init__(self, base_url: str, username: str, password: str, timeout: int = 10):
@@ -16,12 +17,20 @@ class NPMClient:
         r = self.session.post(url, json={"identity": self.username, "secret": self.password}, timeout=self.timeout)
         r.raise_for_status()
         j = r.json()
-        token = j.get('token') or j.get('access_token') or j.get('data', {}).get('token')
-        if not token:
-            raise RuntimeError('Failed to obtain token from NPM: %s' % j)
-        self.token = token
-        self.session.headers.update({"Authorization": f"Bearer {self.token}"})
-        return self.token
+        token = j.get('token') or j.get('data', {}).get('token')
+        if token:
+            self.session.headers.update({"Authorization": f"Bearer {token}"})
+            self.session.headers.pop("Cookie", None)
+            return token
+        set_cookie = r.headers.get('Set-Cookie', '')
+        cookies = search(r'token=([^;]+)', set_cookie)
+        if cookies:
+            cookie_token = cookies.group(1)
+            self.cookie = f"token={cookie_token}; __Host-Http-token={cookie_token}"
+            self.session.headers.update({"Cookie": self.cookie})
+            self.session.headers.pop("Authorization", None)
+            return self.cookie
+        raise RuntimeError(f'Authentication failed. Failed to obtain token from NPM.')
 
     def _get(self, path: str):
         url = f"{self.base_url}{path}"
